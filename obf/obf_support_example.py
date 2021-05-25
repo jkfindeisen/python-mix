@@ -31,7 +31,8 @@ if __name__ == '__main__':
         # load stack data and show first 2D image
         data = stack.data
         fig, ax = plt.subplots()
-        im = ax.imshow(data[:, :, ...], cmap=cm.hot)
+        idx = [slice(None), slice(None)] + [0] * (len(data.shape) - 2)
+        im = ax.imshow(data[tuple(idx)].reshape(data.shape[:2]), cmap=cm.hot)
         ax.set_title(stack.name)
 
         plt.show()

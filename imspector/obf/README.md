@@ -1,0 +1,1 @@
+Pure Python read only support for OBF files.

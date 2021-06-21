@@ -34,7 +34,7 @@
         + read data that was stored in chunks (stack file format version 6)
         + if there is a problem with a stack (like unknown data type, we could simply ignore the stack and print a warning instead
 
-  Author: Jan Keller-Findeisen (https://github.com/jkfindeisen), May 2021, MIT licensed (see ../LICENSE)
+  Author: Jan Keller-Findeisen (https://github.com/jkfindeisen), May 2021, MIT licensed (see LICENSE)
 """
 
 from __future__ import annotations

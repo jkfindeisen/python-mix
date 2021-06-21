@@ -1,15 +1,22 @@
 """
-
 GUI for the hop scanning RESOLFT measurements with Daniel Stumpf and
 Jan Keller-Findeisen at the Dep. NanoBiophotonics, MPI-BPC Göttingen
 
-Note:
-    
-- Only stacks with exactly 4 dimensions can be create with Measurement.create_stack()
+The Hop scanning measurements using the Imspector software from Aberrior Instruments (AI) use
+large step sizes in the first scan axis and a custom axis with a gradual shift in offset to achieve
+hop scanning. The hop scan is necessary to allow switchable proteins to return to their ground state.
 
-specpy-1.2.3-cp37-cp37m-win_amd64.whl
-C:\Imspector\Versions\16.3.13367-w2109-win64\python
+Implementation notes:
 
+- Currently runs together with Imspector 16.3.13367-w2109-win64
+- Uses specpy-1.2.3-cp37-cp37m-win_amd64.whl in Python 3.7 environment (Conda)
+- Only stacks with exactly 4 dimensions can be created with Measurement.create_stack() in specpy
+- Imspector does not get notified if stack contents are updated within specpy, the colorbar scaling is wrong
+- There is no description of SpecPy 1.2.3 available (used the one from 1.2.1 at https://pypi.org/project/specpy/)
+- There are small changes in the usage, could write a document here about them.
+- If a stack on the Imspector side is closed, there is no way to know from Python about that.
+
+  Author: Jan Keller-Findeisen (https://github.com/jkfindeisen), June 2021, MIT licensed (see LICENSE)
 """
 
 import os
@@ -20,17 +27,21 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 import specpy as sp
 
-
-# TODO how are stacks contents updated in Imspector?
-# TODO specpy 1.2.3 description
-# TODO color coding of output
-# TODO how to know that a stack is still present in Imspector
+# TODO is the worker thread finished if the main window is closed, don't allow closing of the main window if a measurement is ongoing
+# TODO should we maybe override the created stacks next time around or create new every time?
+# TODO in principle we also could connect to an Imspector at another location, is this interesting, would specpy Stack creation still work? (I guess not)
 
 class MainWindow(QtWidgets.QWidget):
     """
+    Main window of the GUI. Just does the layout and connects the buttons with their functions.
+    The work is done with a worker thread, which executes methods on the worker. We communicate with the
+    worker thread with signals.
     """
 
     def __init__(self, *args, **kwargs):
+        """
+        Sets up the layout of the main window.
+        """
         super().__init__(*args, **kwargs)
 
         self.setMinimumSize(800, 600)
@@ -88,56 +99,60 @@ class MainWindow(QtWidgets.QWidget):
         layout.addWidget(toolbar)
         layout.addWidget(self._log)
 
-    def log(self, text):
+    def log(self, text: str, type: int=0):
         """
-
-        :param text:
-        :return:
+        Appends a message to the log window prefixing it with the time and possible with different colors.
+        :param text: The message to display.
+        :param type: An integer indicating the color of the text (see dictionary below).
         """
-        self._log.append('<font color="gray">[{}]:</font> {}'.format(datetime.now().time(), text))
+        colors = {0: 'black', 1: 'red', 2: 'green'}
+        color = colors[type]
+        self._log.append('<font color="gray">[{}]:</font> <font color="{}">{}</font>'.format(datetime.now().time(), color, text))
 
 
 class Worker(QtCore.QObject):
     """
-
+    The worker class which does all the interfacing with Imspector and is executed within a worker thread. It communicates
+    with the GUI via signals and slots.
     """
-    log = QtCore.pyqtSignal(str)
-    finished = QtCore.pyqtSignal()  # signals that the worker has finished the current job
+    log = QtCore.pyqtSignal(str, int)
 
     def __init__(self):
+        """
+        Initially there is no Imspector connection.
+        """
         super().__init__()
-        # imspector handle
+        # Imspector handle
         self.im = None
 
     def connect_to_imspector(self):
         """
-
-        :return:
+        Tries to establish an Imspector connection and logs the result.
         """
+        self.log.emit('Connecting with local Imspector.', 0)
         try:
             self.im = sp.get_application()
-            self.log.emit('Connected to Imspector version {} on host {}.'.format(self.im.version(), self.im.host()))
+            self.log.emit('Connected to Imspector version {} on host {}.'.format(self.im.version(), self.im.host()), 0)
         except Exception as e:
-            self.log.emit('Could not connect to Imspector.\n{}'.format(e))
+            self.log.emit(str(e), 1)
 
-        self.finished.emit()
-
-    def check_settings(self):
+    def check_settings(self) -> bool:
         """
-
-        :return:
+        Checks the settings of the current active measurement (hop scan) for plausibility and return False if the check
+        failed.
+        :return: True if the check is passed, False if it failed.
         """
         if not self.im:
-            self.log.emit('Not connected to Imspector.')
+            self.log.emit('Not connected to Imspector.', 1)
             return False
 
-        self.log.emit('Check active measurement.')
+        self.log.emit('Check active measurement.', 0)
 
         # get active measurement
         try:
             msr = self.im.active_measurement()
         except Exception as e:
-            self.log.emit(' Could not obtain active measurement. ({})'.format(e))
+            self.log.emit(' Could not obtain active measurement. ({})'.format(e), 1)
             return False
 
         # get active configuration
@@ -145,20 +160,22 @@ class Worker(QtCore.QObject):
 
         # check that name contains xyc
         if 'xyc' not in cfg.name():
-            self.log.emit(' Warning: Active configuration name does not contain "xyc".')
+            self.log.emit(' Warning: Active configuration name does not contain "xyc".', 1)
 
         # check custom axis
         p = cfg.parameters('/')
         if 'CustomAxis' not in p:
-            self.log.emit('CustomAxis not in configuration parameters')
+            self.log.emit('CustomAxis not in configuration parameters', 1)
             return False
         p2 = cfg.parameters('CustomAxis')
 
         if p2['enabled'] is not True:
-            self.log.emit('Custom axis not enabled, should be enabled.')
+            self.log.emit('Custom axis not enabled, should be enabled.', 1)
+            return False
 
         if p2['pve']['value_name']['path'] != 'ExpControl.scan.range.x.off':
-            self.log.emit('lkfhkjf')
+            self.log.emit('Something is wrong.', 1)
+            return False
 
         length = p2['axis']['len']
         off = p2['axis']['off']
@@ -170,7 +187,8 @@ class Worker(QtCore.QObject):
 
         sm = p2['scan']['range']['scanmode']
         sq = p2['scan']['range']['square_pixels']
-        self.log.emit('Scan {}, {}'.format(sm, sq))
+
+        self.log.emit('Scan with scanmode {} and locked pixel aspect ratio {}'.format(sm, sq), 2)
         self.log.emit(str(p2['scan']['range']['x']))
         self.log.emit(str(p2['scan']['range']['y']))
 
@@ -178,27 +196,27 @@ class Worker(QtCore.QObject):
 
     def run_measurement(self):
         """
-
-        :return:
+        Checks and runs the hop scanning measurement. Times it also and afterwards unhop the scan, creating
+        two new stacks in the current active measurement.
         """
         if not self.im:
-            self.log.emit('Not connected to Imspector.')
+            self.log.emit('Not connected to Imspector.', 1)
             return
 
         # check settings
         if not self.check_settings():
-            self.log.emit('Check not passed.')
+            self.log.emit('Check not passed.', 1)
             return
 
         # get active measurement
         msr = self.im.active_measurement()
 
         # run active measurement with timing
-        self.log.emit('Active measurement running ...')
+        self.log.emit('Active measurement running ...', 0)
         t1 = time.perf_counter()
         self.im.run(msr)
         t2 = time.perf_counter()
-        self.log.emit('Finished ({:.2f}s)'.format(t2 - t1))
+        self.log.emit('Finished ({:.2f}s)'.format(t2 - t1), 2)
 
         # get data out again
         cfg = msr.active_configuration()
@@ -206,7 +224,7 @@ class Worker(QtCore.QObject):
 
         # check that there are two stacks
         if number_stacks != 2:
-            self.log.emit(' Not exactly two output stacks after measurement. Cannot unhop scans.')
+            self.log.emit(' Not exactly two output stacks after measurement. Cannot unhop scans.', 1)
             return
 
         # get both and unhop
@@ -251,7 +269,7 @@ class Worker(QtCore.QObject):
             s.set_labels(labels)
 
 
-def load_icon(name):
+def load_icon(name: str) -> QtGui.QIcon:
     """
     Loads an icon (as QIcon) from our resources place.
     :param name: Just the name part from the icon file.

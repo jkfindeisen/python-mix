@@ -3,12 +3,26 @@
 A mix of Python scripts I might use in my daily work. [License](LICENSE) of presented scripts. No warranty - use at your
 own risk.
 
-## OBF Python support
+## Imspector
 
-The OBF (and MSR) file format is used within my department quite frequencly. See folder [obf](obf) for a pure Python OBF
-content reader.
+Imspector is a microscope measurement control software originating at the MPIBPC and continued and used at AI. There is
+a Python connection to and from Imspector, which can be exploited to facilitate usage of Imspector.
 
-## JPEG XR file reading
+### OBF Python reading support
+
+The OBF (and MSR) file format is used within my department quite frequently. The Imspector Python connection is limited to
+a certain CPython version and OS system. To allow analysis everywhere I made a [pure Python OBF content reader](imspector/obf).
+
+### Hop scan support
+
+[Hop scanning](imspector/hop_scan) (scanning along one axis in large jumps and then repeatedly shifting the offset) to fill the gaps with finely
+pixelated data is interesting for some special microscopy modes.
+
+## PSF calculation
+
+## Notes
+
+### JPEG XR file reading
 
 I needed to read [JXR](https://en.wikipedia.org/wiki/JPEG_XR) files (in Python).
 [Matlab](https://www.mathworks.com/help/matlab/import_export/supported-file-formats.html) does not support the file format.

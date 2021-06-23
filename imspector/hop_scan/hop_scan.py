@@ -27,9 +27,10 @@ from PyQt5 import QtWidgets, QtCore, QtGui
 import numpy as np
 import specpy as sp
 
-# TODO is the worker thread finished if the main window is closed, don't allow closing of the main window if a measurement is ongoing
 # TODO should we maybe override the created stacks next time around or create new every time?
 # TODO in principle we also could connect to an Imspector at another location, is this interesting, would specpy Stack creation still work? (I guess not)
+# TODO general all checks for equality should take numerical precision into account, i.e. instead of a==b do abs(a-b) < 1e-3*(abs(a)+abs(b)) or similar
+# TODO if there are more than two stacks to unhop, try to unhop them all (check for nunmber of stacks)
 
 class MainWindow(QtWidgets.QWidget):
     """
@@ -44,7 +45,7 @@ class MainWindow(QtWidgets.QWidget):
         """
         super().__init__(*args, **kwargs)
 
-        self.setMinimumSize(800, 600)
+        self.setMinimumSize(900, 700)
         self.setWindowTitle('Hop scanning in Imspector')
 
         # worker setup
@@ -105,9 +106,16 @@ class MainWindow(QtWidgets.QWidget):
         :param text: The message to display.
         :param type: An integer indicating the color of the text (see dictionary below).
         """
-        colors = {0: 'black', 1: 'red', 2: 'green'}
+        colors = {0: 'black', 1: 'red', 2: 'green', 3: 'magenta'}
         color = colors[type]
-        self._log.append('<font color="gray">[{}]:</font> <font color="{}">{}</font>'.format(datetime.now().time(), color, text))
+        self._log.append('<font color="gray">[{}]:</font> <font color="{}">{}</font>'.format(datetime.now().time().isoformat()[:-5], color, text))  # lazy with the time format (just killing 5 decimal places here)
+        
+    def closeEvent(self, event):
+        """
+        Makes sure that the worker thread has finished (and finishes its business before) before closing the window.
+        """
+        self._worker_thread.quit()
+        self._worker_thread.wait()
 
 
 class Worker(QtCore.QObject):
@@ -160,38 +168,61 @@ class Worker(QtCore.QObject):
 
         # check that name contains xyc
         if 'xyc' not in cfg.name():
-            self.log.emit(' Warning: Active configuration name does not contain "xyc".', 1)
+            self.log.emit(' Warning: Active configuration name does not contain "xyc".', 3)
 
         # check custom axis
         p = cfg.parameters('/')
         if 'CustomAxis' not in p:
             self.log.emit('CustomAxis not in configuration parameters', 1)
             return False
-        p2 = cfg.parameters('CustomAxis')
+        pA = cfg.parameters('CustomAxis')
 
-        if p2['enabled'] is not True:
+        if pA['enabled'] is not True:
             self.log.emit('Custom axis not enabled, should be enabled.', 1)
             return False
 
-        if p2['pve']['value_name']['path'] != 'ExpControl.scan.range.x.off':
-            self.log.emit('Something is wrong.', 1)
+        if pA['pve']['value_name']['path'] != 'ExpControl.scan.range.x.off':
+            self.log.emit('Custom axis type is not "ExpControl.scan.range.x.off".', 1)
             return False
 
-        length = p2['axis']['len']
-        off = p2['axis']['off']
-        res = p2['axis']['res']
-        psz = p2['axis']['psz']
-        self.log.emit('Custom axis {}, {}, {}, {}'.format(length, off, res, psz))
+        length = pA['axis']['len']
+        offset = pA['axis']['off']
+        resolution = pA['axis']['res']
+        pixel_size = pA['axis']['psz']
+        self.log.emit('Custom axis: length: {}, offset: {}, resolution: {}, pixel size: {}'.format(length, offset, resolution, pixel_size), 2)
 
-        p2 = cfg.parameters('ExpControl')
+        pS = cfg.parameters('ExpControl')
 
-        sm = p2['scan']['range']['scanmode']
-        sq = p2['scan']['range']['square_pixels']
+        scan_mode = pS['scan']['range']['scanmode']
+        square_pixels = pS['scan']['range']['square_pixels']
 
-        self.log.emit('Scan with scanmode {} and locked pixel aspect ratio {}'.format(sm, sq), 2)
-        self.log.emit(str(p2['scan']['range']['x']))
-        self.log.emit(str(p2['scan']['range']['y']))
-
+        self.log.emit('Scan range type {} and square pixels: {}'.format(scan_mode, square_pixels), 2)
+        if square_pixels:
+            self.log.emit("Warning: Most probably there shouldn't be square pixels.", 1)
+        
+        for axis in ['x', 'y']:
+            ax = pS['scan']['range'][axis]
+            length = ax['len']
+            offset = ax['off']
+            resolution = ax['res']
+            üixel_size = ax['psz']
+            self.log.emit('Axis {}: length: {}, offset: {}, resolution: {}, pixel size: {}:'.format(axis, length, offset, resolution, pixel_size), 2)
+            
+        # check consistency
+        
+        # x axis length of length of custom axis
+        x_px = pS['scan']['range']['x']['psz']
+        ca_eff_len = pA['axis']['res'] *  pA['axis']['psz']
+        if (x_px - ca_eff_len) / (x_px + ca_eff_len) > 0.01:
+            self.log.emit('Pixel hop size {} in x does not match effective length of custom axis {}, adjust.'.format(x_px, ca_eff_len), 1)
+            return False
+        
+        # pixel size along custom axis and along y axis
+        y_px = pS['scan']['range']['y']['psz']
+        ca_px = pA['axis']['psz']
+        if y_px != ca_px:
+            self.log.emit('Warning: pixel size in y {} does not equal pixel size along custom axis (no eff. square pixels). Intended?'.format(y_px, ca_px), 3)
+        
         return True
 
     def run_measurement(self):
@@ -224,7 +255,7 @@ class Worker(QtCore.QObject):
 
         # check that there are two stacks
         if number_stacks != 2:
-            self.log.emit(' Not exactly two output stacks after measurement. Cannot unhop scans.', 1)
+            self.log.emit('Not exactly two output stacks after measurement. Cannot unhop scans.', 1)
             return
 
         # get both and unhop
@@ -232,7 +263,7 @@ class Worker(QtCore.QObject):
             stack = cfg.stack(idx)
 
             # unhopping
-            self.log.emit('Unhopping stack {}.'.format(stack.name()))
+            self.log.emit('Unhopping stack {}.'.format(stack.name()), 2)
 
             # get stack data (note: dimensions are reversed to what one would expect)
             data = stack.data()
@@ -267,6 +298,8 @@ class Worker(QtCore.QObject):
             labels[2] = labels[3]
             labels[3] = 'None'
             s.set_labels(labels)
+
+        msr.update()  # does this tell Imspector to update the colorbar ranges of the pushed stacks?
 
 
 def load_icon(name: str) -> QtGui.QIcon:

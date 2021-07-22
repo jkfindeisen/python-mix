@@ -1,5 +1,3 @@
-copy (2021-05) of https://github.com/AbberiorInstruments/ImspectorDocs/blob/master/docs/fileformat.rst
-
 ============
 File Formats
 ============

@@ -14,25 +14,28 @@ if __name__ == '__main__':
     obf = obf_support.File(file_path)
 
     print('file: {}'.format(file_path))
-    print('file format version: {}'.format(obf.format_version))
-    print('file description: "{}"'.format(obf.description))
-    print('contains {} stacks'.format(len(obf.stacks)))
+    print(' format version: {}'.format(obf.format_version))
+    print(' description: "{}"'.format(obf.description))
+    print(' contains {} stacks'.format(len(obf.stacks)))
 
-    for stack in obf.stacks:
-        print('\nstack format version: {}'.format(stack.format_version))
-        print('stack name: "{}"'.format(stack.name))
-        print('stack description: "{}"'.format(stack.description))
-        print('stack shape: {}'.format(stack.shape))
-        print('stack lengths: {}'.format(stack.lengths))
-        print('stack pixel sizes: {}'.format(stack.pixel_sizes))
-        print('stack offsets: {}'.format(stack.offsets))
-        print('stack data type: {}'.format(stack.data_type.__name__))
+    for index, stack in enumerate(obf.stacks[-1:]):
+        print('\nstack {}'.format(index))
+        print(' format version: {}'.format(stack.format_version))
+        print(' name: "{}"'.format(stack.name))
+        print(' description: "{}"'.format(stack.description))
+        print(' shape: {}'.format(stack.shape))
+        print(' dimensionality: {}'.format(stack.dimensionality))
+        print(' lengths: {}'.format(stack.lengths))
+        print(' pixel sizes: {}'.format(stack.pixel_sizes))
+        print(' offsets: {}'.format(stack.offsets))
+        print(' data type: {}'.format(stack.data_type.__name__))
 
         # load stack data and show first 2D image
         data = stack.data
-        fig, ax = plt.subplots()
-        idx = [slice(None), slice(None)] + [0] * (len(data.shape) - 2)
-        im = ax.imshow(data[tuple(idx)].reshape(data.shape[:2]), cmap=cm.hot)
-        ax.set_title(stack.name)
+        if data.size > 0:  # don't display empty stacks
+            fig, ax = plt.subplots()
+            idx = [slice(None), slice(None)] + [0] * (len(data.shape) - 2)
+            im = ax.imshow(data[tuple(idx)].reshape(data.shape[:2]), cmap=cm.hot)
+            ax.set_title(stack.name)
 
         plt.show()
